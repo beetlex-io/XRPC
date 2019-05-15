@@ -19,6 +19,53 @@ class Program
     }
 }
 ```
+## Server controller
+``` csharp
+    [Controller(typeof(IUserService))]
+    public class UserService : IUserService
+    {
+        public Task<User> Add(string name, string email, string city, string remark)
+        {
+            User user = new User();
+            user.Name = name;
+            user.EMail = email;
+            user.City = city;
+            user.Remark = remark;
+            return Task.FromResult(user);
+        }
+
+        public Task<List<User>> List(int count)
+        {
+            List<User> result = new List<User>();
+            for (int i = 0; i < count; i++)
+            {
+                User user = new User();
+                user.ID = Guid.NewGuid().ToString("N");
+                user.City = "GuangZhou";
+                user.EMail = "Henryfan@msn.com";
+                user.Name = "henryfan";
+                user.Remark = "http://ikende.com";
+                result.Add(user);
+            }
+            return Task.FromResult(result);
+        }
+
+        public bool Login(string name, string pwd)
+        {
+            return (name == "admin" && pwd == "123456");
+        }
+
+        public User Modify(User user)
+        {
+            return user;
+        }
+
+        public void Save()
+        {
+            Console.WriteLine("user saved");
+        }
+    }
+```
 ## Client
 ``` csharp
 client = new XRPCClient("localhost", 9090);
