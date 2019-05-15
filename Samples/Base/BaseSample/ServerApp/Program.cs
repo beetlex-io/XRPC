@@ -13,6 +13,7 @@ namespace ServerApp
         static void Main(string[] args)
         {
             mXRPCServer = new XRPCServer();
+            mXRPCServer.ServerOptions.DefaultListen.Port = 80;
             mXRPCServer.Register(typeof(Program).Assembly);
             mXRPCServer.Open();
             Console.Read();

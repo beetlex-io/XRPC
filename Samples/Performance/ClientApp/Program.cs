@@ -12,10 +12,10 @@ namespace ClientApp
         static XRPCClient client;
         static IUserService UserService;
         static int mCount;
-        static int[] mUsers = new int[] { 20, 50, 100, 200, 500 };
+        static int[] mUsers = new int[] { 20, 50, 100 };
         static void Main(string[] args)
         {
-            client = new XRPCClient("192.168.2.18", 9090, 3);
+            client = new XRPCClient("localhost", 9090);
             client.Connect();
             client.NetError = (c, e) =>
             {
@@ -103,7 +103,7 @@ namespace ClientApp
             }
             Task.WaitAll(tasks.ToArray());
             double useTime = TimeWatch.GetElapsedMilliseconds() - start;
-            Console.WriteLine($"[{DateTime.Now:t}][Add][Users:{users}|Count:{mCount}|Times:{useTime:######.000}ms|RPS:{(mCount / useTime * 1000):#######}]");
+            Console.WriteLine($"[{DateTime.Now:t}][List][Users:{users}|Count:{mCount}|Times:{useTime:######.000}ms|RPS:{(mCount / useTime * 1000):#######}]");
             await Task.CompletedTask;
         }
     }
