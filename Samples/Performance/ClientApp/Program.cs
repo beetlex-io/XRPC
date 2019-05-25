@@ -12,10 +12,11 @@ namespace ClientApp
         static XRPCClient client;
         static IUserService UserService;
         static int mCount;
-        static int[] mUsers = new int[] { 20, 50, 100 };
+        static int[] mUsers = new int[] { 200 };
+        static int round = 10000;
         static void Main(string[] args)
         {
-            client = new XRPCClient("localhost", 9090);
+            client = new XRPCClient("192.168.2.18", 9090,2);
             client.Connect();
             client.NetError = (c, e) =>
             {
@@ -40,6 +41,7 @@ namespace ClientApp
 
         static async Task Login(int users)
         {
+           
             mCount = 0;
             List<Task> tasks = new List<Task>();
             double start = TimeWatch.GetElapsedMilliseconds();
@@ -47,7 +49,7 @@ namespace ClientApp
             {
                 var item = Task.Run(async () =>
                 {
-                    for (int k = 0; k < 10000; k++)
+                    for (int k = 0; k < round; k++)
                     {
                         var result = await UserService.Login("admin", "123456");
                         System.Threading.Interlocked.Increment(ref mCount);
@@ -70,7 +72,7 @@ namespace ClientApp
             {
                 var item = Task.Run(async () =>
                 {
-                    for (int k = 0; k < 10000; k++)
+                    for (int k = 0; k < round; k++)
                     {
                         var result = await UserService.Add("henry", "henryfan@msn.com", "guangzhou", "http://github.com");
                         System.Threading.Interlocked.Increment(ref mCount);
@@ -93,7 +95,7 @@ namespace ClientApp
             {
                 var item = Task.Run(async () =>
                 {
-                    for (int k = 0; k < 10000; k++)
+                    for (int k = 0; k < round; k++)
                     {
                         var result = await UserService.List(5);
                         System.Threading.Interlocked.Increment(ref mCount);

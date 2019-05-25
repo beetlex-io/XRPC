@@ -3,7 +3,7 @@ using MessagePack;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-
+using EventNext;
 namespace ServerApp
 {
     class Program
@@ -20,7 +20,7 @@ namespace ServerApp
     }
 
 
-    [Controller(typeof(IUserService))]
+    [Service(typeof(IUserService))]
     public class UserService : IUserService
     {
         public Task<User> Add(string name, string email, string city, string remark)
@@ -49,32 +49,33 @@ namespace ServerApp
             return Task.FromResult(result);
         }
 
-        public bool Login(string name, string pwd)
+        public Task<bool> Login(string name, string pwd)
         {
-            return (name == "admin" && pwd == "123456");
+            return (name == "admin" && pwd == "123456").ToTask();
         }
 
-        public User Modify(User user)
+        public Task<User> Modify(User user)
         {
-            return user;
+            return user.ToTask();
         }
 
-        public void Save()
+        public Task Save()
         {
             Console.WriteLine("user saved");
+            return Task.CompletedTask;
         }
     }
 
 
     public interface IUserService
     {
-        bool Login(string name, string pwd);
+        Task<bool> Login(string name, string pwd);
 
         Task<User> Add(string name, string email, string city, string remark);
 
-        void Save();
+        Task Save();
 
-        User Modify(User user);
+        Task<User> Modify(User user);
 
         Task<List<User>> List(int count);
     }

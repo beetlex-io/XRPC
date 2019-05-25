@@ -27,16 +27,10 @@ namespace ClientApp
             var api = client.Create<IUserService>();
             var lresult = await api.Login("admin", "123456");
             Console.WriteLine(lresult);
-
-
             var result = await api.Add("henry", "henryfan@msn.com", "gz", "http://github.com");
             Console.WriteLine($"{result.Name}\t{result.EMail}\t{result.City}\t{result.Remark}");
-
-
             await api.Save();
             Console.WriteLine("save completed");
-
-
             User user = new User();
             user.ID = Guid.NewGuid().ToString("N");
             user.Name = "henry";
@@ -45,7 +39,6 @@ namespace ClientApp
             user.Remark = "http://github.com/ikende";
             result = await api.Modify(user);
             Console.WriteLine($"{result.Name}\t{result.EMail}\t{result.City}\t{result.Remark}");
-
             var items = await api.List(5);
             foreach(var item in items)
             {
