@@ -12,11 +12,11 @@ namespace ClientApp
         static XRPCClient client;
         static IUserService UserService;
         static int mCount;
-        static int[] mUsers = new int[] { 200 };
-        static int round = 10000;
+        static int[] mUsers = new int[] { 50, 100, 200, 500 };
+        static int round = 100000;
         static void Main(string[] args)
         {
-            client = new XRPCClient("192.168.2.18", 9090,2);
+            client = new XRPCClient("192.168.2.18", 9090, 2);
             client.Connect();
             client.NetError = (c, e) =>
             {
@@ -30,18 +30,20 @@ namespace ClientApp
 
         static async void Test()
         {
-            foreach (int i in mUsers)
-                await Login(i);
-            foreach (int i in mUsers)
-                await Add(i);
-            foreach (int i in mUsers)
-                await List(i);
-
+            for (int j = 0; j < 10; j++)
+            {
+                foreach (int i in mUsers)
+                    await Login(i);
+                foreach (int i in mUsers)
+                    await Add(i);
+                foreach (int i in mUsers)
+                    await List(i);
+            }
         }
 
         static async Task Login(int users)
         {
-           
+
             mCount = 0;
             List<Task> tasks = new List<Task>();
             double start = TimeWatch.GetElapsedMilliseconds();
