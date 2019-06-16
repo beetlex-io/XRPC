@@ -11,6 +11,7 @@ namespace Actors
         Task<int> Payout(int amount);
         Task<int> Get();
     }
+
     [Service(typeof(IAmountService))]
     public class AmountService : ActorState, IAmountService
     {

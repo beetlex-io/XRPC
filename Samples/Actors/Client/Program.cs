@@ -2,7 +2,6 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using EventNext;
 namespace Client
 {
     class Program
@@ -19,7 +18,7 @@ namespace Client
                 Console.WriteLine(e.Error.Message);
             };
             client.TimeOut = 10000;
-            Test(50, 1000);
+            Test(1, 1000);
             Console.Read();
         }
 
@@ -30,7 +29,7 @@ namespace Client
             IAmountService ken = client.Create<IAmountService>("ken");
             Console.WriteLine($"[C:{concurrent}|R:{requests}]Testing ");
             List<Task> tasks = new List<Task>();
-            double start = EventCenter.Watch.ElapsedMilliseconds;
+            double start = BeetleX.TimeWatch.GetElapsedMilliseconds();
             for (int i = 0; i < concurrent; i++)
             {
                 var task = Task.Run(async () =>
@@ -39,57 +38,40 @@ namespace Client
                     {
                         await henry.Income(10);
                         System.Threading.Interlocked.Increment(ref mCount);
-                        await ken.Income(10);
-                        System.Threading.Interlocked.Increment(ref mCount);
                     }
-
                 });
                 tasks.Add(task);
-
                 task = Task.Run(async () =>
                 {
                     for (int k = 0; k < requests; k++)
                     {
                         await henry.Payout(10);
                         System.Threading.Interlocked.Increment(ref mCount);
-                        await ken.Payout(10);
-                        System.Threading.Interlocked.Increment(ref mCount);
                     }
-
                 });
                 tasks.Add(task);
-
-
                 task = Task.Run(async () =>
                 {
                     for (int k = 0; k < requests; k++)
                     {
-
                         await ken.Income(10);
                         System.Threading.Interlocked.Increment(ref mCount);
                     }
-
                 });
                 tasks.Add(task);
-
                 task = Task.Run(async () =>
                 {
                     for (int k = 0; k < requests; k++)
                     {
-
                         await ken.Payout(10);
                         System.Threading.Interlocked.Increment(ref mCount);
                     }
-
                 });
                 tasks.Add(task);
-
             }
             await Task.WhenAll(tasks.ToArray());
-
-            double useTime = EventCenter.Watch.ElapsedMilliseconds - start;
+            double useTime = BeetleX.TimeWatch.GetElapsedMilliseconds() - start;
             Console.WriteLine($"Completed count:{mCount}|use time:{useTime}|rps:{(mCount / useTime * 1000d):###.00} |henry:{await henry.Get()},ken:{await ken.Get()}");
-
         }
     }
 

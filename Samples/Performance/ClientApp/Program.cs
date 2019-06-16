@@ -12,8 +12,8 @@ namespace ClientApp
         static XRPCClient client;
         static IUserService UserService;
         static int mCount;
-        static int[] mUsers = new int[] { 50, 100, 200, 500 };
-        static int round = 100000;
+        static int[] mUsers = new int[] { 50, 100, 200 };
+        static int round = 10000;
         static void Main(string[] args)
         {
             client = new XRPCClient("192.168.2.18", 9090, 2);
