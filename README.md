@@ -105,5 +105,5 @@ foreach(var item in items)
 `
 Server:E3-1230V2 16Gb Bandwidth：10Gb sysetm:windows 2008
 `
-![](https://raw.githubusercontent.com/IKende/XRPC/master/test_report.png)
-[https://github.com/IKende/XRPC/tree/master/Samples/Performance](https://github.com/IKende/XRPC/tree/master/Samples/Performance)
+![](https://github.com/IKende/dotnet-rpc-benchmark/raw/master/Result/10G_128C.png?raw=true)
+[https://github.com/IKende/dotnet-rpc-benchmark](https://github.com/IKende/dotnet-rpc-benchmark)
