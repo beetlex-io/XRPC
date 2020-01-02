@@ -1,7 +1,8 @@
 # XRPC
 dotnet high performance remote interface invoke(RPC) communication components,implemente millions RPS remote interface method calls.
-## v0.3.3
-Reference EventNext support create remote actors
+## samples
+https://github.com/IKende/BeetleX-Samples
+
 ## Install Packet
 ``` 
 Install-Package BeetleX.XRPC -Version x
