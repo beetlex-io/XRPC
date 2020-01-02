@@ -8,32 +8,57 @@ using System.Collections.Concurrent;
 using System.Linq;
 using BeetleX.Dispatchs;
 using EventNext;
+using System.Net.Security;
 
 namespace BeetleX.XRPC.Clients
 {
     public class XRPCClient
     {
-        static XRPCClient()
-        {
-            BeetleX.Buffers.BufferPool.BUFFER_SIZE = 1024 * 32;
-        }
-
         public EventClientError NetError
         {
             get;
             set;
         }
-
-        public XRPCClient(string host, int port, int maxConnections = 2)
+        public XRPCClient(string host, int port, string sslServiceName, int maxConnections = 1)
+        {
+            mSslServerName = sslServiceName ?? Host;
+            Host = host;
+            Port = port;
+            MaxConnections = maxConnections;
+            Init();
+        }
+        public XRPCClient(string host, int port, int maxConnections = 1)
         {
             Host = host;
             Port = port;
-            mReceiveDispatchCenter = new DispatchCenter<Response>(OnProcess);
             MaxConnections = maxConnections;
+            Init();
+        }
+
+        private void Init()
+        {
+            mReceiveDispatchCenter = new DispatchCenter<Response>(OnProcess);
             mAwaiterFactory = new Awaiter.AwaiterFactory();
+            InitConnect();
         }
 
         private List<AsyncTcpClient> mClients = new List<AsyncTcpClient>();
+
+        private RemoteCertificateValidationCallback mCertificateValidationCallback;
+
+        public RemoteCertificateValidationCallback CertificateValidationCallback
+        {
+            get
+            {
+                return mCertificateValidationCallback;
+            }
+            set
+            {
+                mCertificateValidationCallback = value;
+                foreach (var item in mClients)
+                    item.CertificateValidationCallback = mCertificateValidationCallback;
+            }
+        }
 
         public int MaxConnections { get; private set; }
 
@@ -51,12 +76,7 @@ namespace BeetleX.XRPC.Clients
 
         private Awaiter.AwaiterFactory mAwaiterFactory;
 
-        public void SslEnabled(string serverName = null)
-        {
-            mSslServerName = serverName ?? Host;
-        }
-
-        private void OnProcess(Response response)
+        protected virtual void OnProcess(Response response)
         {
             var awaitItem = mAwaiterFactory.GetItem(response.ID);
             if (awaitItem != null)
@@ -165,7 +185,7 @@ namespace BeetleX.XRPC.Clients
             mReceiveDispatchCenter.Enqueue(response);
         }
 
-        public void Connect()
+        private void InitConnect()
         {
             for (int i = 0; i < MaxConnections; i++)
             {

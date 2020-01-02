@@ -1,6 +1,8 @@
 ﻿using BeetleX.EventArgs;
 using System;
 using System.Collections.Generic;
+using System.Reflection;
+using System.Runtime;
 using System.Text;
 
 namespace BeetleX.XRPC
@@ -12,7 +14,7 @@ namespace BeetleX.XRPC
             mFileLog = new FileLogWriter("BEETLEX_XRPC_SERVER");
 
             mRequestDispatchCenter = new Dispatchs.DispatchCenter<Request>(OnRequestProcess);
-            this.ServerOptions.BufferSize = 1024 * 32;
+            this.ServerOptions.BufferSize = 1024 * 8;
         }
 
         private long mRequests = 0;
@@ -27,18 +29,32 @@ namespace BeetleX.XRPC
 
         private void BindRequestParameter(Request request, EventNext.EventActionHandler handler)
         {
-            request.Data = new object[request.Paramters];
-            var buffer = request.DataBuffer.Array;
-            int offset = request.DataBuffer.Offset;
-            for (int i = 0; i < request.Paramters; i++)
+            try
             {
-                int len = BitConverter.ToInt32(buffer, offset);
-                offset += 4;
-                request.Data[i] = RPCOptions.ParameterFormater.Decode(
-                    RPCOptions, handler?.Parameters[i].Type, new ArraySegment<byte>(buffer, offset, len));
-                offset += len;
+                request.Data = new object[request.Paramters];
+                var buffer = request.DataBuffer.Array;
+                int offset = request.DataBuffer.Offset;
+                for (int i = 0; i < request.Paramters; i++)
+                {
+                    int len = BitConverter.ToInt32(buffer, offset);
+                    offset += 4;
+                    request.Data[i] = RPCOptions.ParameterFormater.Decode(
+                        RPCOptions, handler?.Parameters[i].Type, new ArraySegment<byte>(buffer, offset, len));
+                    offset += len;
+                }
+            }
+            finally
+            {
+                var array = request.DataBuffer;
+                if (array != null)
+                {
+                    this.RPCOptions.PushBuffer(array.Array, array.Count);
+                }
+                request.DataBuffer = null;
             }
         }
+
+        private Dictionary<string, object> mProperties = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
 
         class EventCompleted : EventNext.IEventCompleted
         {
@@ -62,7 +78,6 @@ namespace BeetleX.XRPC
                 Server.OnResponse(Request, response);
             }
         }
-
 
         private void OnEventNext(Request e)
         {
@@ -114,15 +129,6 @@ namespace BeetleX.XRPC
                 {
                     Log(LogType.Debug, $"[{e.ID}]{e.Sesion.RemoteEndPoint} request {e.Url} error {e_.Message}@{e_.StackTrace}!");
                 }
-            }
-            finally
-            {
-                var array = e.DataBuffer;
-                if (array != null)
-                {
-                    this.RPCOptions.PushBuffer(array.Array, array.Count);
-                }
-                e.DataBuffer = null;
             }
         }
 
@@ -234,9 +240,30 @@ namespace BeetleX.XRPC
             BeetleX.XRPC.Packets.ServerPacket serverPacke = new Packets.ServerPacket();
             serverPacke.Options = this.RPCOptions;
             mServer = SocketFactory.CreateTcpServer(this, serverPacke, ServerOptions);
-
+            mServer.WriteLogo = OutputLogo;
             mServer.Open();
-            Log(LogType.Info, $"BeetleX XRPC started [{GetType().Assembly.GetName().Version}]");
+           
+        }
+
+        private void OutputLogo()
+        {
+            AssemblyCopyrightAttribute productAttr = typeof(BeetleX.BXException).Assembly.GetCustomAttribute<AssemblyCopyrightAttribute>();
+            var logo = "\r\n";
+            logo += "*******************************************************************************\r\n";
+            logo += " BeetleX xrpc service framework \r\n";
+
+            logo += $" {productAttr.Copyright}\r\n";
+            logo += $" ServerGC    [{GCSettings.IsServerGC}]\r\n";
+            logo += $" BeetleX     Version [{typeof(BeetleX.BXException).Assembly.GetName().Version}]\r\n";
+            logo += $" XRPC        Version [{ typeof(XRPCServer).Assembly.GetName().Version}] \r\n";
+            logo += " -----------------------------------------------------------------------------\r\n";
+            foreach (var item in Server.Options.Listens)
+            {
+                logo += $" {item}\r\n";
+            }
+            logo += "*******************************************************************************\r\n";
+
+            Server.Log(LogType.Info, null, logo);
         }
 
         private void OnEventLog(object sender, EventNext.Events.EventLogArgs e)
@@ -250,6 +277,20 @@ namespace BeetleX.XRPC
             response.ID = request.ID;
             request.Sesion.Send(response);
         }
+
+        public object this[string name]
+        {
+            get
+            {
+                mProperties.TryGetValue(name, out object result);
+                return result;
+            }
+            set
+            {
+                mProperties[name] = value;
+            }
+        }
+
 
         public void Dispose()
         {
