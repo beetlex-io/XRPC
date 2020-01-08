@@ -4,6 +4,9 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime;
 using System.Text;
+using System.Collections.Concurrent;
+using System.Threading.Tasks;
+using BeetleX.XRPC.Clients;
 
 namespace BeetleX.XRPC
 {
@@ -13,7 +16,7 @@ namespace BeetleX.XRPC
         {
             mFileLog = new FileLogWriter("BEETLEX_XRPC_SERVER");
 
-            mRequestDispatchCenter = new Dispatchs.DispatchCenter<Request>(OnRequestProcess);
+            mRequestDispatchCenter = new Dispatchs.DispatchCenter<RPCPacket>(OnRequestProcess);
             this.ServerOptions.BufferSize = 1024 * 8;
         }
 
@@ -25,47 +28,27 @@ namespace BeetleX.XRPC
 
         private FileLogWriter mFileLog;
 
-        private BeetleX.Dispatchs.DispatchCenter<Request> mRequestDispatchCenter;
+        private BeetleX.Dispatchs.DispatchCenter<RPCPacket> mRequestDispatchCenter;
 
-        private void BindRequestParameter(Request request, EventNext.EventActionHandler handler)
+        private void BindRequestParameter(RPCPacket request, EventNext.EventActionHandler handler)
         {
-            try
-            {
-                request.Data = new object[request.Paramters];
-                var buffer = request.DataBuffer.Array;
-                int offset = request.DataBuffer.Offset;
-                for (int i = 0; i < request.Paramters; i++)
-                {
-                    int len = BitConverter.ToInt32(buffer, offset);
-                    offset += 4;
-                    request.Data[i] = RPCOptions.ParameterFormater.Decode(
-                        RPCOptions, handler?.Parameters[i].Type, new ArraySegment<byte>(buffer, offset, len));
-                    offset += len;
-                }
-            }
-            finally
-            {
-                var array = request.DataBuffer;
-                if (array != null)
-                {
-                    this.RPCOptions.PushBuffer(array.Array, array.Count);
-                }
-                request.DataBuffer = null;
-            }
+            request.LoadParameters(handler != null ? handler.ParametersType : null);
         }
 
         private Dictionary<string, object> mProperties = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
+        private Awaiter.AwaiterFactory AwaiterFactory = new Awaiter.AwaiterFactory(Awaiter.AwaiterFactory.SERVER_START, Awaiter.AwaiterFactory.SERVER_END);
 
         class EventCompleted : EventNext.IEventCompleted
         {
 
             public XRPCServer Server { get; set; }
 
-            public Request Request { get; set; }
+            public RPCPacket Request { get; set; }
 
             public void Completed(EventNext.IEventOutput data)
             {
-                Response response = new Response();
+                RPCPacket response = new RPCPacket();
                 response.Status = (short)data.EventError;
                 response.Header = data.Properties;
                 response.Data = data.Data;
@@ -79,7 +62,7 @@ namespace BeetleX.XRPC
             }
         }
 
-        private void OnEventNext(Request e)
+        private void OnEventNext(RPCPacket e)
         {
             EventNext.EventInput input = new EventNext.EventInput();
             input.ID = e.ID;
@@ -91,45 +74,119 @@ namespace BeetleX.XRPC
                 string info = Newtonsoft.Json.JsonConvert.SerializeObject(input);
                 Log(LogType.Debug, $"[{input.ID}]{e.Sesion.RemoteEndPoint} receive event data:{info}");
             }
-            input.Token = new NetToken { Request = e, Server = e.Sesion.Server, Session = e.Sesion };
+            input.Token = new XRPCEventToken { Request = e, Server = this, Session = e.Sesion };
             EventCenter.Execute(input, new EventCompleted { Server = this, Request = e });
 
         }
 
-        private void OnRequestProcess(Request e)
+        private void OnRequestProcess(RPCPacket e)
         {
-            Response response;
+            RPCPacket response = e;
             try
             {
                 EventNext.EventActionHandler handler = EventCenter.GetActionHandler(e.Url);
-                BindRequestParameter(e, handler);
                 if (handler != null)
                 {
+                    BindRequestParameter(e, handler);
                     OnEventNext(e);
                 }
                 else
                 {
-                    if (EnableLog(LogType.Debug))
+                    if (e.Url == "/__System/Ping")
                     {
-                        Log(LogType.Debug, $"[{e.ID}]{e.Sesion.RemoteEndPoint} request {e.Url} not found!");
+                        response = new RPCPacket();
+                        if (EnableLog(LogType.Debug))
+                        {
+                            Log(LogType.Debug, $"[{e.ID}]{e.Sesion.RemoteEndPoint} request {e.Url}");
+                        }
+                        response.Status = (short)StatusCode.SUCCESS;
+                        OnResponse(e, response);
                     }
-                    response = new Response();
-                    response.Status = (short)ResponseCode.ACTION_NOT_FOUND;
-                    response.Data = new object[] { $"request {e.Url} not found!" };
-                    OnResponse(e, response);
+                    else
+                    {
+                        var awaitItem = AwaiterFactory.GetItem(response.ID);
+                        if (awaitItem != null)
+                        {
+                            response.ResultType = awaitItem.ResultType;
+                            try
+                            {
+                                if (response.ResultType != null)
+                                {
+                                    response.LoadParameters(response.ResultType);
+                                }
+                            }
+                            catch (Exception e_)
+                            {
+                                response.Status = (short)StatusCode.INNER_ERROR;
+                                response.Data = new object[] { $"{e_.Message}@{e_.StackTrace}" };
+                            }
+                            AwaiterFactory.Completed(awaitItem, response);
+                        }
+                        else
+                        {
+
+                            if (Receive == null)
+                            {
+                                if (EnableLog(LogType.Debug))
+                                {
+                                    Log(LogType.Debug, $"[{e.ID}]{e.Sesion.RemoteEndPoint} request {e.Url} not found!");
+                                }
+                                response = new RPCPacket();
+                                response.Status = (short)StatusCode.ACTION_NOT_FOUND;
+                                response.Data = new object[] { $"request {e.Url} not found!" };
+                                OnResponse(e, response);
+                            }
+                            else
+                            {
+                                Receive.Invoke(this, new Events.EventActionNotFoundArgs(this, e));
+                            }
+                        }
+                    }
+
                 }
             }
             catch (Exception e_)
             {
-                response = new Response();
-                response.Status = (short)ResponseCode.INNER_ERROR;
-                response.Data = new object[] { e_.Message };
-                OnResponse(e, response);
                 if (EnableLog(LogType.Error))
                 {
                     Log(LogType.Debug, $"[{e.ID}]{e.Sesion.RemoteEndPoint} request {e.Url} error {e_.Message}@{e_.StackTrace}!");
                 }
             }
+        }
+
+        public int ClientTimeout { get; set; } = 1000 * 10;
+
+        public event EventHandler<Events.EventActionNotFoundArgs> Receive;
+
+        public void Send(RPCPacket response, ISession[] sessions)
+        {
+            if (sessions != null)
+            {
+                foreach (var item in sessions)
+                {
+                    System.Threading.Interlocked.Add(ref mResponses, sessions.Length);
+                    mServer.Send(response, sessions);
+                }
+            }
+        }
+
+        public void Reply(RPCPacket response, RPCPacket request)
+        {
+            OnResponse(request, response);
+        }
+
+        public Task<RPCPacket> SendWait(RPCPacket request, ISession session, int timeout = 10000)
+        {
+            return SendWait(request, session, null, timeout);
+        }
+
+        internal Task<RPCPacket> SendWait(RPCPacket request, ISession session, Type[] resultTypes, int timeout = 10000)
+        {
+            var result = AwaiterFactory.Create(request, resultTypes, timeout);
+            request.ID = result.Item1;
+            session.Send(request);
+            System.Threading.Interlocked.Increment(ref mRequests);
+            return result.Item2.Task;
         }
 
         public long Requests => mRequests;
@@ -152,6 +209,10 @@ namespace BeetleX.XRPC
         public Options RPCOptions { get; private set; } = new Options();
 
         public IServer Server => mServer;
+
+        public event System.EventHandler<ConnectedEventArgs> RPCConnected;
+
+        public event System.EventHandler<SessionEventArgs> RPCDisconnect;
 
         public void Log(LogType type, string message, params object[] parameters)
         {
@@ -209,29 +270,33 @@ namespace BeetleX.XRPC
             if (server.Count > ServerOptions.MaxConnections)
             {
                 e.Cancel = true;
+                if (EnableLog(LogType.Warring))
+                    Log(LogType.Warring, $"XRPC Maximum online limit,{e.Socket.RemoteEndPoint} closed!");
             }
-            e.Socket.NoDelay = true;
         }
 
         public override void Connected(IServer server, ConnectedEventArgs e)
         {
             base.Connected(server, e);
+            RPCConnected?.Invoke(this, e);
         }
 
         public override void Disconnect(IServer server, SessionEventArgs e)
         {
             base.Disconnect(server, e);
+            RPCDisconnect?.Invoke(this, e);
         }
 
         protected override void OnReceiveMessage(IServer server, ISession session, object message)
         {
             base.OnReceiveMessage(server, session, message);
-            Request request = (Request)message;
+            RPCPacket request = (RPCPacket)message;
             if (EnableLog(LogType.Debug))
             {
                 Log(LogType.Debug, $"[{request.ID}]{session.RemoteEndPoint} receive message {request.Url}@{request.ID}");
             }
             System.Threading.Interlocked.Increment(ref mRequests);
+            Server.UpdateSession(session);
             mRequestDispatchCenter.Enqueue(request);
         }
 
@@ -242,7 +307,7 @@ namespace BeetleX.XRPC
             mServer = SocketFactory.CreateTcpServer(this, serverPacke, ServerOptions);
             mServer.WriteLogo = OutputLogo;
             mServer.Open();
-           
+
         }
 
         private void OutputLogo()
@@ -271,7 +336,7 @@ namespace BeetleX.XRPC
             Log((LogType)e.Type, e.Message);
         }
 
-        internal void OnResponse(Request request, Response response)
+        internal void OnResponse(RPCPacket request, RPCPacket response)
         {
             System.Threading.Interlocked.Increment(ref mResponses);
             response.ID = request.ID;
@@ -291,7 +356,6 @@ namespace BeetleX.XRPC
             }
         }
 
-
         public void Dispose()
         {
             if (mServer != null)
@@ -299,6 +363,32 @@ namespace BeetleX.XRPC
                 mServer.Dispose();
                 mServer = null;
             }
+        }
+
+        public static XRPCEventToken EventToken
+        {
+            get
+            {
+                return (XRPCEventToken)EventNext.EventCenter.EventActionContext?.Input.Token;
+            }
+        }
+
+        public T GetClient<T>(ISession session)
+        {
+            string key = typeof(T).Name;
+            object result = session[key];
+            if (result == null)
+            {
+                result = DispatchProxy.Create<T, XRPCSeverInvokeClientDispatch>();
+                XRPCSeverInvokeClientDispatch dispatch = ((XRPCSeverInvokeClientDispatch)result);
+                dispatch.Session = session;
+                dispatch.Server = this;
+                dispatch.Type = typeof(T);
+                dispatch.InitHandlers();
+                return (T)result;
+            }
+            return (T)result;
+
         }
     }
 }

@@ -4,7 +4,7 @@ using System.Text;
 
 namespace BeetleX.XRPC
 {
-    public enum ResponseCode : short
+    public enum StatusCode : short
     {
         SUCCESS = 200,
 
@@ -14,6 +14,10 @@ namespace BeetleX.XRPC
 
         REQUEST_TIMEOUT = 408,
 
-        NOT_SUPPORT = 403
+        NOT_SUPPORT = 403,
+
+        BAD_REQUEST = 400,
+
+        ENEITY_TOO_LARGE = 413
     }
 }

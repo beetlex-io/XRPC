@@ -15,8 +15,11 @@ namespace BeetleX.XRPC.Clients
             ResultType = method.ReturnType;
             PropertyInfo pi = method.ReturnType.GetProperty("Result", BindingFlags.Public | BindingFlags.Instance);
             if (pi != null)
+            {
                 ResultProperty = new PropertyHandler(pi);
-         
+                ResultPropertyInfo = pi;
+            }
+
             IsTaskResult = ResultType.BaseType == typeof(Task) || ResultType == typeof(Task);
             IsVoid = ResultType == typeof(void);
             ResponseType = GetResponseType();
@@ -29,6 +32,8 @@ namespace BeetleX.XRPC.Clients
         public string Url { get; set; }
 
         public MethodInfo MethodInfo { get; set; }
+
+        public PropertyInfo ResultPropertyInfo { get; set; }
 
         internal MethodHandler MethodHandler { get; set; }
 
@@ -63,6 +68,11 @@ namespace BeetleX.XRPC.Clients
         }
 
         private Type mCompletionSourceType;
+
+        public object Execute(object controller, params object[] parameters)
+        {
+            return MethodHandler.Execute(controller, parameters);
+        }
 
         internal IAnyCompletionSource GetCompletionSource()
         {

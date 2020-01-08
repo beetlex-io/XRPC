@@ -12,7 +12,7 @@ namespace BeetleX.XRPC.Awaiter
 
         }
 
-        private TaskCompletionSource<Response> completionSource;
+        private TaskCompletionSource<RPCPacket> completionSource;
 
         public int ID { get; set; }
 
@@ -22,14 +22,14 @@ namespace BeetleX.XRPC.Awaiter
 
         public Type[] ResultType { get; set; }
 
-        public TaskCompletionSource<Response> Create(long expiredTime)
+        public TaskCompletionSource<RPCPacket> Create(long expiredTime)
         {
             TimeOut = expiredTime;
-            completionSource = new TaskCompletionSource<Response>();
+            completionSource = new TaskCompletionSource<RPCPacket>();
             return completionSource;
         }
 
-        public bool Completed(Response data)
+        public bool Completed(RPCPacket data)
         {
             if (System.Threading.Interlocked.CompareExchange(ref mFree, 1, 0) == 0)
             {
@@ -40,9 +40,9 @@ namespace BeetleX.XRPC.Awaiter
             return false;
         }
 
-        public Request Request { get; set; }
+        public RPCPacket Request { get; set; }
 
-        public Response Response { get; set; }
+        public RPCPacket Response { get; set; }
 
     }
 }

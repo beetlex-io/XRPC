@@ -10,7 +10,7 @@ namespace BeetleX.XRPC.Packets
     public class ServerPacket : IPacket
     {
 
-        private Request mRequest;
+        private RPCPacket mRequest;
 
         private PacketDecodeCompletedEventArgs mCompletedArgs = new PacketDecodeCompletedEventArgs();
 
@@ -32,7 +32,7 @@ namespace BeetleX.XRPC.Packets
             {
                 if (mRequest == null)
                 {
-                    mRequest = new Request();
+                    mRequest = new RPCPacket();
                     mRequest.Sesion = session;
                   
                 }
@@ -69,7 +69,7 @@ namespace BeetleX.XRPC.Packets
         private void OnEncode(ISession session, object data, System.IO.Stream stream)
         {
             PipeStream pstream = stream.ToPipeStream();
-            Response response = data as Response;
+            RPCPacket response = data as RPCPacket;
             response.Write(Options, pstream);
         }
 

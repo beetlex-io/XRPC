@@ -9,7 +9,7 @@ namespace BeetleX.XRPC.Packets
 {
     public class ClientPacket : BeetleX.Clients.IClientPacket
     {
-        private Response mResponse;
+        private RPCPacket mPacket;
 
         public Options Options { get; set; }
 
@@ -27,21 +27,20 @@ namespace BeetleX.XRPC.Packets
             PipeStream pstream = stream.ToPipeStream();
             while (true)
             {
-                if (mResponse == null)
+                if (mPacket == null)
                 {
-                    mResponse = new Response();
-                    mResponse.Client = client;
-                 
+                    mPacket = new RPCPacket();
+                    mPacket.Client = (AsyncTcpClient)client;
                 }
-                if (mResponse.Read(Options, pstream))
+                if (mPacket.Read(Options, pstream))
                 {
                     try
                     {
-                        Completed?.Invoke(client, mResponse);
+                        Completed?.Invoke(client, mPacket);
                     }
                     finally
                     {
-                        mResponse = null;
+                        mPacket = null;
                     }
                 }
                 else
@@ -57,7 +56,7 @@ namespace BeetleX.XRPC.Packets
         public void Encode(object data, IClient client, Stream stream)
         {
             PipeStream pstream = stream.ToPipeStream();
-            Request request = data as Request;
+            RPCPacket request = data as RPCPacket;
             request.Write(Options, pstream);
         }
     }

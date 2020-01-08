@@ -9,7 +9,7 @@ namespace BeetleX.XRPC.Clients
     {
         void Success(object data);
         void Error(Exception error);
-        void WaitResponse(Task<Response> task);
+        void WaitResponse(Task<RPCPacket> task);
 
         ClientActionHandler ClientActionHandler { get; set; }
 
@@ -30,10 +30,10 @@ namespace BeetleX.XRPC.Clients
 
         public ClientActionHandler ClientActionHandler { get; set; }
 
-        public async void WaitResponse(Task<Response> task)
+        public async void WaitResponse(Task<RPCPacket> task)
         {
             var response = await task;
-            if (response.Status != (short)ResponseCode.SUCCESS)
+            if (response.Status != (short)StatusCode.SUCCESS)
             {
                 XRPCException error = new XRPCException((string)response.Data[0]);
                 Error(error);

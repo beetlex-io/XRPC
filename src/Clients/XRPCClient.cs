@@ -19,6 +19,7 @@ namespace BeetleX.XRPC.Clients
             get;
             set;
         }
+
         public XRPCClient(string host, int port, string sslServiceName, int maxConnections = 1)
         {
             mSslServerName = sslServiceName ?? Host;
@@ -27,6 +28,7 @@ namespace BeetleX.XRPC.Clients
             MaxConnections = maxConnections;
             Init();
         }
+
         public XRPCClient(string host, int port, int maxConnections = 1)
         {
             Host = host;
@@ -37,12 +39,17 @@ namespace BeetleX.XRPC.Clients
 
         private void Init()
         {
-            mReceiveDispatchCenter = new DispatchCenter<Response>(OnProcess);
-            mAwaiterFactory = new Awaiter.AwaiterFactory();
+            mReceiveDispatchCenter = new DispatchCenter<RPCPacket>(OnProcess);
+            mAwaiterFactory = new Awaiter.AwaiterFactory(Awaiter.AwaiterFactory.CLIENT_START, Awaiter.AwaiterFactory.CLIENT_END);
             InitConnect();
+            mPingTimer = new System.Threading.Timer(OnPing, null, 10000, 10000);
         }
 
-        private List<AsyncTcpClient> mClients = new List<AsyncTcpClient>();
+        private List<TcpClientItem> mClients = new List<TcpClientItem>();
+
+        public ControllerCenter Controllers { get; private set; } = new ControllerCenter();
+
+        public List<TcpClientItem> Clients => mClients;
 
         private RemoteCertificateValidationCallback mCertificateValidationCallback;
 
@@ -56,7 +63,7 @@ namespace BeetleX.XRPC.Clients
             {
                 mCertificateValidationCallback = value;
                 foreach (var item in mClients)
-                    item.CertificateValidationCallback = mCertificateValidationCallback;
+                    item.TcpClient.CertificateValidationCallback = mCertificateValidationCallback;
             }
         }
 
@@ -72,11 +79,36 @@ namespace BeetleX.XRPC.Clients
 
         private string mSslServerName;
 
-        private DispatchCenter<Response> mReceiveDispatchCenter;
+        private DispatchCenter<RPCPacket> mReceiveDispatchCenter;
 
         private Awaiter.AwaiterFactory mAwaiterFactory;
 
-        protected virtual void OnProcess(Response response)
+        public Awaiter.AwaiterFactory AwaiterFactory => mAwaiterFactory;
+
+        public System.EventHandler<RPCPacket> Receive { get; set; }
+
+        private async void InvokeController(ControllerCenter.HandlerItem handler, RPCPacket packet)
+        {
+            RPCPacket response = new RPCPacket();
+            try
+            {
+                packet.LoadParameters(handler.Parameters);
+                var result = handler.Handler.Execute(handler.Controller, packet.Data);
+                if (result is Task task)
+                    await task;
+                var data = handler.GetValue(result);
+                if (data != null)
+                    response.Data = new object[] { data };
+            }
+            catch (Exception e_)
+            {
+                response.Status = (short)StatusCode.INNER_ERROR;
+                response.Data = new string[] { e_.Message };
+            }
+            packet.ReplyPacket(response);
+        }
+
+        protected virtual void OnProcess(RPCPacket response)
         {
             var awaitItem = mAwaiterFactory.GetItem(response.ID);
             if (awaitItem != null)
@@ -84,103 +116,63 @@ namespace BeetleX.XRPC.Clients
                 response.ResultType = awaitItem.ResultType;
                 try
                 {
-                    if (response.Status == (short)ResponseCode.SUCCESS)
-                    {
-                        response.Data = new Object[response.Paramters];
-                        var results = response.ResultType;
-                        var buffer = response.DataBuffer.Array;
-                        int offset = response.DataBuffer.Offset;
-                        for (int i = 0; i < response.Paramters; i++)
-                        {
-                            int len = BitConverter.ToInt32(buffer, offset);
-                            offset += 4;
-                            response.Data[i] = Options.ParameterFormater.Decode(
-                                Options, results != null && i < results.Length ?
-                                response.ResultType[i] : null, new ArraySegment<byte>(buffer, offset, len));
-                            offset += len;
-                        }
-                    }
-                    else
-                    {
-                        var buffer = response.DataBuffer.Array;
-                        int offset = response.DataBuffer.Offset;
-                        int len = BitConverter.ToInt32(buffer, offset);
-                        offset += 4;
-                        object error = Options.ParameterFormater.Decode(Options, typeof(string), new ArraySegment<byte>(buffer, offset, len));
-                        response.Data = new object[] { error };
-                    }
+                    response.LoadParameters(response.ResultType);
                 }
                 catch (Exception e_)
                 {
-                    response.Status = (short)ResponseCode.INNER_ERROR;
+                    response.Status = (short)StatusCode.INNER_ERROR;
                     response.Data = new object[] { $"{e_.Message}@{e_.StackTrace}" };
-                }
-                finally
-                {
-                    var array = response.DataBuffer;
-                    if (array != null)
-                    {
-                        this.Options.PushBuffer(array.Array, array.Count);
-                    }
-                    response.DataBuffer = null;
                 }
 
                 mAwaiterFactory.Completed(awaitItem, response);
             }
             else
             {
-                //notfound;
-                OnNotFound(response);
+                try
+                {
+                    //notfound;
+                    var item = Controllers.GetHandler(response.Url);
+                    if (item != null)
+                        InvokeController(item, response);
+                    else
+                    {
+                        if (Receive != null)
+                            Receive(this, response);
+                        else
+                        {
+                            if (response.NeedReply)
+                            {
+                                var result = new RPCPacket();
+                                result.Status = (short)StatusCode.NOT_SUPPORT;
+                                result.Data = new object[] { $"{response.Url} not found!" };
+                                response.ReplyPacket(result);
+                            }
+                        }
+                    }
+                }
+                catch (Exception e_)
+                {
+                    OnError(response.Client, new ClientErrorArgs { Error = e_, Message = $"Packet process event error {e_.Message}" });
+                }
             }
         }
 
-        private void OnNotFound(Response response)
+        private void OnError(IClient client, ClientErrorArgs e)
         {
             try
             {
-                if (response.Status == (short)ResponseCode.SUCCESS)
-                {
-                    response.Data = new Object[response.Paramters];
-                    var buffer = response.DataBuffer.Array;
-                    int offset = response.DataBuffer.Offset;
-                    for (int i = 0; i < response.Paramters; i++)
-                    {
-                        int len = BitConverter.ToInt32(buffer, offset);
-                        offset += 4;
-                        response.Data[i] = Options.ParameterFormater.Decode(
-                            Options, null, new ArraySegment<byte>(buffer, offset, len));
-                        offset += len;
-                    }
-                }
-                else
-                {
-                    var buffer = response.DataBuffer.Array;
-                    int offset = response.DataBuffer.Offset;
-                    int len = BitConverter.ToInt32(buffer, offset);
-                    offset += 4;
-                    object error = Options.ParameterFormater.Decode(Options, typeof(string), new ArraySegment<byte>(buffer, offset, len));
-                    response.Data = new object[] { error };
-                }
+                NetError.Invoke(client, e);
             }
-            catch (Exception e_)
+            catch
             {
-                response.Status = (short)ResponseCode.INNER_ERROR;
-                response.Data = new object[] { $"{e_.Message}@{e_.StackTrace}" };
+
             }
-            finally
-            {
-                var array = response.DataBuffer;
-                if (array != null)
-                {
-                    this.Options.PushBuffer(array.Array, array.Count);
-                }
-                response.DataBuffer = null;
-            }
+
         }
 
         private void OnPacketCompleted(IClient client, object message)
         {
-            Response response = (Response)message;
+            RPCPacket response = (RPCPacket)message;
             System.Threading.Interlocked.Increment(ref mResponses);
             mReceiveDispatchCenter.Enqueue(response);
         }
@@ -205,18 +197,17 @@ namespace BeetleX.XRPC.Clients
              packet, Host, Port, mSslServerName);
                 }
                 client.PacketReceive = OnPacketCompleted;
-                client.ClientError = (c, e) =>
-                {
-                    NetError?.Invoke(c, e);
-                };
-                mClients.Add(client);
+                client.ClientError = OnError;
+                bool isnew;
+                client.Connect(out isnew);
+                mClients.Add(new TcpClientItem(client, this));
             }
         }
 
         private AsyncTcpClient GetClient()
         {
             long index = System.Threading.Interlocked.Increment(ref mIndex);
-            return mClients[(int)(index % mClients.Count)];
+            return mClients[(int)(index % mClients.Count)].TcpClient;
         }
 
         public long Requests => mRequests;
@@ -227,7 +218,7 @@ namespace BeetleX.XRPC.Clients
 
         public int Port { get; set; }
 
-        public int TimeOut { get; set; } = 1000 * 100;
+        public int TimeOut { get; set; } = 1000 * 10;
 
         public T Create<T>(string actorID = null)
         {
@@ -240,10 +231,31 @@ namespace BeetleX.XRPC.Clients
             return (T)result;
         }
 
-        public Task<Response> Send(Request request, Type[] resultType = null)
+        public void Register<Service>(Service serviceImpl)
         {
-            var client = GetClient();
-            if (client.Connect())
+            Controllers.Register<Service>(serviceImpl);
+        }
+
+        public void Send(RPCPacket request, AsyncTcpClient client = null)
+        {
+            client = client ?? GetClient();
+            bool isnew;
+            if (client.Connect(out isnew))
+            {
+                client.Send(request);
+                System.Threading.Interlocked.Increment(ref mRequests);
+            }
+            else
+            {
+                throw client.LastError;
+            }
+        }
+
+        public Task<RPCPacket> SendWait(RPCPacket request, AsyncTcpClient client, Type[] resultType = null)
+        {
+            client = client ?? GetClient();
+            bool isnew;
+            if (client.Connect(out isnew))
             {
                 var result = mAwaiterFactory.Create(request, resultType, TimeOut);
                 request.ID = result.Item1;
@@ -256,124 +268,36 @@ namespace BeetleX.XRPC.Clients
                 throw client.LastError;
             }
         }
+        #region ping
 
-        public class XRPCClientDispatch : DispatchProxy, EventNext.IHeader
+        private System.Threading.Timer mPingTimer;
+
+        private int mPingTimeout = 0;
+
+        public int PingTimeout
         {
-
-            private Dictionary<string, ClientActionHandler> mHandlers = new Dictionary<string, ClientActionHandler>();
-
-            private Dictionary<string, string> mHeader = new Dictionary<string, string>();
-
-            public Type Type { get; set; }
-
-            public Dictionary<string, ClientActionHandler> Handlers => mHandlers;
-
-            public XRPCClient Client { get; set; }
-
-            public string Actor { get; set; }
-
-            public Dictionary<string, string> Header => mHeader;
-
-            internal void InitHandlers()
+            get
             {
-                Type type = Type;
-                ServiceAttribute attribute = type.GetCustomAttribute<ServiceAttribute>(false);
-                string url = "/" + (attribute?.Name ?? type.Name) + "/";
-                foreach (MethodInfo method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance))
-                {
-                    if (string.Compare("Equals", method.Name, true) == 0
-                  || string.Compare("GetHashCode", method.Name, true) == 0
-                  || string.Compare("GetType", method.Name, true) == 0
-                  || string.Compare("ToString", method.Name, true) == 0 || method.Name.IndexOf("set_") >= 0
-                  || method.Name.IndexOf("get_") >= 0)
-                        continue;
-                    ActionAttribute aa = method.GetCustomAttribute<ActionAttribute>(false);
-                    var actionUrl = url + (aa == null ? method.Name : aa.Name);
-                    var handler = mHandlers.Values.FirstOrDefault(c => c.Url == actionUrl);
-                    if (handler != null)
-                    {
-                        throw new XRPCException($"{type.Name}.{method.Name} action already exists, can add ActionAttribute on the method");
-                    }
-                    else
-                    {
-                        handler = new ClientActionHandler(method);
-                        handler.Url = actionUrl;
-                        mHandlers[method.Name] = handler;
-                    }
-                }
+                return mPingTimeout;
             }
-
-            protected override object Invoke(MethodInfo targetMethod, object[] args)
+            set
             {
-                if (!mHandlers.TryGetValue(targetMethod.Name, out ClientActionHandler handler))
-                {
-                    var error = new XRPCException($"{targetMethod.Name} action not found!");
-                    error.ErrorCode = (short)ResponseCode.ACTION_NOT_FOUND;
-                    throw error;
-                }
+                mPingTimeout = value;
+                if (mPingTimeout > 0)
+                    mPingTimer.Change(1000, 1000);
                 else
-                {
-                    if (!handler.IsTaskResult)
-                    {
-                        var error = new XRPCException("Definition is not supported, please define task with return value!");
-                        error.ErrorCode = (short)ResponseCode.NOT_SUPPORT;
-                        throw error;
-                    }
-
-                    var request = new Request();
-                    request.Url = handler.Url;
-                    request.Data = args;
-                    if (!string.IsNullOrEmpty(Actor))
-                    {
-                        request.Header = new Dictionary<string, string>();
-                        request.Header[EventCenter.ACTOR_TAG] = this.Actor;
-                    }
-                    if (mHeader.Count > 0)
-                    {
-                        if (request.Header == null)
-                            request.Header = new Dictionary<string, string>();
-                        foreach (var item in mHeader)
-                        {
-                            request.Header.Add(item.Key, item.Value);
-                        }
-                    }
-                    var task = Client.Send(request, handler.ResponseType);
-                    if (!handler.IsTaskResult)
-                    {
-                        if (task.Wait(Client.TimeOut))
-                        {
-                            var response = task.Result;
-                            if (response.Status == (short)ResponseCode.SUCCESS)
-                            {
-                                if (response.Paramters > 0)
-                                    return response.Data[0];
-                                return null;
-                            }
-                            else
-                            {
-                                Client.mAwaiterFactory.GetItem(request.ID);
-                                var error = new XRPCException((string)response.Data[0]);
-                                error.ErrorCode = response.Status;
-                                throw error;
-                            }
-                        }
-                        else
-                        {
-                            var error = new XRPCException($"{targetMethod.Name} action time out!");
-                            error.ErrorCode = (short)ResponseCode.REQUEST_TIMEOUT;
-                            throw error;
-                        }
-                    }
-                    else
-                    {
-                        IAnyCompletionSource source = handler.GetCompletionSource();
-                        source.WaitResponse(task);
-                        return source.GetTask();
-                    }
-
-                }
+                    mPingTimer.Change(100000, 100000);
             }
         }
+
+        private void OnPing(object state)
+        {
+            foreach (var item in Clients)
+            {
+                item.Ping();
+            }
+        }
+        #endregion
 
     }
 }

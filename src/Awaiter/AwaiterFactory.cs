@@ -17,7 +17,15 @@ namespace BeetleX.XRPC.Awaiter
 
         const int COUNT = 1024 * 1024;
 
-        public AwaiterFactory(int startid = 1, int end = 100000000)
+        public const int CLIENT_START = 10000000;
+
+        public const int CLIENT_END = 19999999;
+
+        public const int SERVER_START = 20000000;
+
+        public const int SERVER_END = 29999999;
+
+        public AwaiterFactory(int startid, int end)
         {
             mID = startid;
             mStartID = startid;
@@ -40,8 +48,8 @@ namespace BeetleX.XRPC.Awaiter
 
         private void OnTimeProcess(AwaiterItem item)
         {
-            Response response = new Response();
-            response.Status = (short)ResponseCode.REQUEST_TIMEOUT;
+            RPCPacket response = new RPCPacket();
+            response.Status = (short)StatusCode.REQUEST_TIMEOUT;
             response.Data = new object[] { $"Request {item.Request.Url} time out!" };
             Completed(item, response);
         }
@@ -51,7 +59,7 @@ namespace BeetleX.XRPC.Awaiter
             try
             {
                 mTimer.Change(-1, -1);
-                long timeout = TimeWatch.GetElapsedMilliseconds();      
+                long timeout = TimeWatch.GetElapsedMilliseconds();
                 var items = mAwaiterItemGroup.GetTimeouts(timeout);
                 if (items.Count > 0)
                 {
@@ -59,7 +67,7 @@ namespace BeetleX.XRPC.Awaiter
                     {
                         mTimeDispatch.Enqueue(items[i]);
                     }
-                   
+
                 }
             }
             catch
@@ -77,8 +85,9 @@ namespace BeetleX.XRPC.Awaiter
             return mAwaiterItemGroup.Get(id);
         }
 
-        public (int, TaskCompletionSource<Response>) Create(Request request, Type[] resultType, int timeout = 1000 * 100)
+        public (int, TaskCompletionSource<RPCPacket>) Create(RPCPacket request, Type[] resultType, int timeout = 1000 * 10)
         {
+            request.NeedReply = true;
             int id = 0;
             long expiredTime;
             lock (this)
@@ -87,7 +96,7 @@ namespace BeetleX.XRPC.Awaiter
                 if (mID >= mEndID)
                     mID = mStartID;
                 id = mID;
-            
+
             }
             expiredTime = TimeWatch.GetElapsedMilliseconds() + timeout;
             var item = new AwaiterItem();
@@ -98,7 +107,7 @@ namespace BeetleX.XRPC.Awaiter
             return (id, item.Create(expiredTime));
         }
 
-        public bool Completed(AwaiterItem item, Response data)
+        public bool Completed(AwaiterItem item, RPCPacket data)
         {
             if (item.Completed(data))
             {
@@ -161,13 +170,14 @@ namespace BeetleX.XRPC.Awaiter
 
                 public void GetTimeouts(List<AwaiterItem> items, double time)
                 {
-                    foreach (var item in mItems.Values)
-                    {
-                        if (time > item.TimeOut)
+                    if (mItems.Count > 0)
+                        foreach (var item in mItems.Values)
                         {
-                            items.Add(Get(item.ID));
+                            if (time > item.TimeOut)
+                            {
+                                items.Add(Get(item.ID));
+                            }
                         }
-                    }
                 }
             }
         }
