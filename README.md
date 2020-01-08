@@ -9,101 +9,54 @@ Install-Package BeetleX.XRPC -Version x
 ```
 ## Server
 ``` csharp
-class Program
-{
-   private static XRPCServer mXRPCServer;
-   static void Main(string[] args)
-   {
-        mXRPCServer = new XRPCServer();
-        //mXRPCServer.ServerOptions.DefaultListen.Port = 80;
-        mXRPCServer.Register(typeof(Program).Assembly);
-        mXRPCServer.Open();
-        Console.Read();
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            var builder = new HostBuilder()
+            .ConfigureServices((hostContext, services) =>
+            {
+                services.UseXRPC(s =>
+                {
+                    s.ServerOptions.LogLevel = BeetleX.EventArgs.LogType.Trace;
+                    s.ServerOptions.DefaultListen.Port = 9090;
+                    s.RPCOptions.ParameterFormater = new JsonPacket();//default messagepack
+                },
+                    typeof(Program).Assembly);
+            });
+            builder.Build().Run();
+        }
     }
-}
 ```
 ## Server controller
 ``` csharp
-    [Controller(typeof(IUserService))]
-    public class UserService : IUserService
+
+    public interface IHello
     {
-        public Task<User> Add(string name, string email, string city, string remark)
-        {
-            User user = new User();
-            user.Name = name;
-            user.EMail = email;
-            user.City = city;
-            user.Remark = remark;
-            return Task.FromResult(user);
-        }
+        Task<string> Hello(string name);
+    }
 
-        public Task<List<User>> List(int count)
+    [Service(typeof(IHello))]
+    public class HelloImpl : IHello
+    {
+        public Task<string> Hello(string name)
         {
-            List<User> result = new List<User>();
-            for (int i = 0; i < count; i++)
-            {
-                User user = new User();
-                user.ID = Guid.NewGuid().ToString("N");
-                user.City = "GuangZhou";
-                user.EMail = "Henryfan@msn.com";
-                user.Name = "henryfan";
-                user.Remark = "http://ikende.com";
-                result.Add(user);
-            }
-            return Task.FromResult(result);
-        }
-
-        public bool Login(string name, string pwd)
-        {
-            return (name == "admin" && pwd == "123456");
-        }
-
-        public User Modify(User user)
-        {
-            return user;
-        }
-
-        public void Save()
-        {
-            Console.WriteLine("user saved");
+            return $"hello {name} {DateTime.Now}".ToTask();
         }
     }
 ```
 ## Client
 ``` csharp
-client = new XRPCClient("localhost", 9090);
-client.Connect();
-client.NetError = (c, e) =>
-{
-      Console.WriteLine(e.Error.Message);
-};
-client.TimeOut = 10000;
+            client = new XRPCClient("localhost", 9090);
+            client.Options.ParameterFormater = new JsonPacket();//default messagepack
+            hello = client.Create<IHello>();
+            while(true)
+            {
+                Console.Write("Enter you name:");
+                var name = Console.ReadLine();
+                var task = hello.Hello(name);
+                task.Wait();
+                Console.WriteLine(task.Result);
+            }
 ```
-``` csharp
-var api = client.Create<IUserService>();
-var lresult = await api.Login("admin", "123456");
-Console.WriteLine(lresult);
-var result = await api.Add("henry", "henryfan@msn.com", "gz", "http://github.com");
-Console.WriteLine($"{result.Name}\t{result.EMail}\t{result.City}\t{result.Remark}");
-await api.Save();
-Console.WriteLine("save completed");
-User user = new User();
-user.ID = Guid.NewGuid().ToString("N");
-user.Name = "henry";
-user.EMail = "henryfan@msn.com";
-user.City = "GuangZhou";
-user.Remark = "http://github.com/ikende";
-result = await api.Modify(user);
-Console.WriteLine($"{result.Name}\t{result.EMail}\t{result.City}\t{result.Remark}");
-var items = await api.List(5);
-foreach(var item in items)
-{
-    Console.WriteLine($"{item.Name}\t{item.EMail}\t{item.City}\t{item.Remark}");
-}
-```
-## Performance
-`
-Server:E3-1230V2 16Gb Bandwidth：10Gb sysetm:windows 2008
-`
-![](https://github.com/IKende/dotnet-rpc-benchmark/raw/master/Result/10G_128C.png?raw=true)
-[https://github.com/IKende/dotnet-rpc-benchmark](https://github.com/IKende/dotnet-rpc-benchmark)
+
