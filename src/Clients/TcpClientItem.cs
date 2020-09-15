@@ -19,50 +19,31 @@ namespace BeetleX.XRPC.Clients
 
         public bool Connected => TcpClient.IsConnected;
 
-        public long PingTime { get; set; }
-
-
-        public bool TimeOut(long time)
-        {
-            return (TimeWatch.GetElapsedMilliseconds() - PingTime) > time;
-        }
-
         private int mPingStatus = 0;
+
+        private int mPingError = 0;
 
         public async void Ping()
         {
             if (System.Threading.Interlocked.CompareExchange(ref mPingStatus, 1, 0) == 0)
             {
-                if (TcpClient.IsConnected)
+                try
                 {
-                    try
-                    {
-                        RPCPacket request = new RPCPacket();
-                        request.Url = "/__System/Ping";
-                        var response = await XRPCClient.SendWait(request, TcpClient, null);
-                        PingTime = TimeWatch.GetElapsedMilliseconds();
-                    }
-                    catch (Exception e_)
-                    {
-
-                    }
-                    finally
-                    {
-                        if (TimeOut(XRPCClient.PingTimeout * 1000))
-                        {
-                            TcpClient.DisConnect();
-                            bool isnew;
-                            TcpClient.Connect(out isnew);
-                        }
-                    }
+                    RPCPacket request = new RPCPacket();
+                    request.Url = "/__System/Ping";
+                    var response = await XRPCClient.SendWait(request, TcpClient, null);
                 }
-                else
+                catch (Exception e_)
                 {
-                    PingTime = TimeWatch.GetElapsedMilliseconds();
+                    mPingError++;
+                    if (mPingError > 3)
+                    {
+                        mPingError = 0;
+                        TcpClient.DisConnect();
+                    }
                 }
                 System.Threading.Interlocked.Exchange(ref mPingStatus, 0);
             }
         }
-
     }
 }

@@ -7,6 +7,7 @@ using System.Text;
 using System.Collections.Concurrent;
 using System.Threading.Tasks;
 using BeetleX.XRPC.Clients;
+using BeetleX.XRPC.Events;
 
 namespace BeetleX.XRPC
 {
@@ -19,6 +20,8 @@ namespace BeetleX.XRPC
             mRequestDispatchCenter = new Dispatchs.DispatchCenter<RPCPacket>(OnRequestProcess);
             this.ServerOptions.BufferSize = 1024 * 8;
         }
+
+        public const string NAME_PROPERTY_TAG = "__XRPC_NET_USER";
 
         private long mRequests = 0;
 
@@ -56,7 +59,7 @@ namespace BeetleX.XRPC
                 if (Server.EnableLog(LogType.Debug))
                 {
                     string info = Newtonsoft.Json.JsonConvert.SerializeObject(data);
-                    Server.Log(LogType.Debug, $"[{data.ID}]{Request.Sesion.RemoteEndPoint} send event data:{info}");
+                    Server.Log(LogType.Debug, $"[{data.ID}]{Request.Session.RemoteEndPoint} send event data:{info}");
                 }
                 Server.OnResponse(Request, response);
             }
@@ -72,9 +75,9 @@ namespace BeetleX.XRPC
             if (EnableLog(LogType.Debug))
             {
                 string info = Newtonsoft.Json.JsonConvert.SerializeObject(input);
-                Log(LogType.Debug, $"[{input.ID}]{e.Sesion.RemoteEndPoint} receive event data:{info}");
+                Log(LogType.Debug, $"[{input.ID}]{e.Session.RemoteEndPoint} receive event data:{info}");
             }
-            input.Token = new XRPCEventToken { Request = e, Server = this, Session = e.Sesion };
+            input.Token = new XRPCEventToken { Request = e, Server = this, Session = e.Session };
             EventCenter.Execute(input, new EventCompleted { Server = this, Request = e });
 
         }
@@ -84,6 +87,18 @@ namespace BeetleX.XRPC
             RPCPacket response = e;
             try
             {
+                var evt = OnProcessing(e);
+                if (evt != null && evt.Cancel)
+                    return;
+                if(this.Security)
+                {
+                    if (e.Session.Authentication < AuthenticationType.User && e.Url != Clients.XRPCClient.LOGIN_TAG)
+                    {
+                        e.ReplyError((short)StatusCode.INNER_ERROR, "No permission operation in secure mode!");
+                        return;
+                    }
+
+                }
                 EventNext.EventActionHandler handler = EventCenter.GetActionHandler(e.Url);
                 if (handler != null)
                 {
@@ -97,10 +112,32 @@ namespace BeetleX.XRPC
                         response = new RPCPacket();
                         if (EnableLog(LogType.Debug))
                         {
-                            Log(LogType.Debug, $"[{e.ID}]{e.Sesion.RemoteEndPoint} request {e.Url}");
+                            Log(LogType.Debug, $"[{e.ID}]{e.Session.RemoteEndPoint} request {e.Url}");
                         }
                         response.Status = (short)StatusCode.SUCCESS;
                         OnResponse(e, response);
+                    }
+                    else if(e.Url== Clients.XRPCClient.LOGIN_TAG)
+                    {
+                        EventLoginArgs login = new EventLoginArgs(this, e.Session);
+                        e.LoadParameters<string, string>();
+                        login.UserName = (string)e.Data[0];
+                        login.Password = (string)e.Data[1];
+                        Login?.Invoke(this,login);
+                        if(login.Success)
+                        {
+                            e.Session[NAME_PROPERTY_TAG] = login.UserName;
+                            e.ReplySuccess();
+                        }
+                        else
+                        {
+                            string error = login.Message;
+                            if(string.IsNullOrEmpty(error))
+                            {
+                                error = "Invalid username or password!";
+                            }
+                            e.ReplyError(error);
+                        }
                     }
                     else
                     {
@@ -125,11 +162,21 @@ namespace BeetleX.XRPC
                         else
                         {
 
-                            if (Receive == null)
+                            if (response.Url.IndexOf(XRPCClient.DELEGATE_TAG, StringComparison.OrdinalIgnoreCase) == 0)
+                            {
+                                InvokeDelegate(response);
+                                return;
+                            }
+                            if (response.Url.IndexOf(XRPCClient.SUBSCRIBE_TAG, StringComparison.OrdinalIgnoreCase) == 0)
+                            {
+                                OnSubscribe(response);
+                                return;
+                            }
+                            if (NotFound == null)
                             {
                                 if (EnableLog(LogType.Debug))
                                 {
-                                    Log(LogType.Debug, $"[{e.ID}]{e.Sesion.RemoteEndPoint} request {e.Url} not found!");
+                                    Log(LogType.Debug, $"[{e.ID}]{e.Session.RemoteEndPoint} request {e.Url} not found!");
                                 }
                                 response = new RPCPacket();
                                 response.Status = (short)StatusCode.ACTION_NOT_FOUND;
@@ -138,7 +185,7 @@ namespace BeetleX.XRPC
                             }
                             else
                             {
-                                Receive.Invoke(this, new Events.EventActionNotFoundArgs(this, e));
+                                NotFound.Invoke(this, new Events.EventPacketArgs(this, e));
                             }
                         }
                     }
@@ -149,14 +196,39 @@ namespace BeetleX.XRPC
             {
                 if (EnableLog(LogType.Error))
                 {
-                    Log(LogType.Debug, $"[{e.ID}]{e.Sesion.RemoteEndPoint} request {e.Url} error {e_.Message}@{e_.StackTrace}!");
+                    Log(LogType.Error, $"[{e.ID}]{e.Session.RemoteEndPoint} process {e.Url} error {e_.Message}@{e_.StackTrace}!");
                 }
             }
         }
 
+        protected EventPacketProcessingArgs OnProcessing(RPCPacket packet)
+        {
+            if (Processing != null)
+            {
+                try
+                {
+                    EventPacketProcessingArgs e = new EventPacketProcessingArgs(this, packet);
+                    Processing(this, e);
+                    return e;
+                }
+                catch (Exception e_)
+                {
+                    if (EnableLog(LogType.Error))
+                    {
+                        Log(LogType.Error, $"[{packet.ID}]{packet.Session.RemoteEndPoint} processing {packet.Url} event error {e_.Message}@{e_.StackTrace}!");
+                    }
+                }
+            }
+            return null;
+        }
+
         public int ClientTimeout { get; set; } = 1000 * 10;
 
-        public event EventHandler<Events.EventActionNotFoundArgs> Receive;
+        public EventHandler<Events.EventLoginArgs> Login { get; set; }
+
+        public event EventHandler<Events.EventPacketProcessingArgs> Processing;
+
+        public event EventHandler<Events.EventPacketArgs> NotFound;
 
         public void Send(RPCPacket response, ISession[] sessions)
         {
@@ -175,14 +247,14 @@ namespace BeetleX.XRPC
             OnResponse(request, response);
         }
 
-        public Task<RPCPacket> SendWait(RPCPacket request, ISession session, int timeout = 10000)
+        public Task<RPCPacket> SendWait(RPCPacket request, ISession session)
         {
-            return SendWait(request, session, null, timeout);
+            return SendWait(request, session, null);
         }
 
-        internal Task<RPCPacket> SendWait(RPCPacket request, ISession session, Type[] resultTypes, int timeout = 10000)
+        internal Task<RPCPacket> SendWait(RPCPacket request, ISession session, Type[] resultTypes)
         {
-            var result = AwaiterFactory.Create(request, resultTypes, timeout);
+            var result = AwaiterFactory.Create(request, resultTypes, ClientTimeout);
             request.ID = result.Item1;
             session.Send(request);
             System.Threading.Interlocked.Increment(ref mRequests);
@@ -192,6 +264,8 @@ namespace BeetleX.XRPC
         public long Requests => mRequests;
 
         public long Responses => mResponses;
+
+        public bool Security { get; set; } = false;
 
         public void Register(object controller)
         {
@@ -312,10 +386,21 @@ namespace BeetleX.XRPC
 
         private void OutputLogo()
         {
-            AssemblyCopyrightAttribute productAttr = typeof(BeetleX.BXException).Assembly.GetCustomAttribute<AssemblyCopyrightAttribute>();
+            AssemblyCopyrightAttribute productAttr = typeof(XRPCServer).Assembly.GetCustomAttribute<AssemblyCopyrightAttribute>();
             var logo = "\r\n";
-            logo += "*******************************************************************************\r\n";
-            logo += " BeetleX xrpc service framework \r\n";
+            logo += " -----------------------------------------------------------------------------\r\n";
+            logo +=
+@"          ____                  _     _         __   __
+         |  _ \                | |   | |        \ \ / /
+         | |_) |   ___    ___  | |_  | |   ___   \ V / 
+         |  _ <   / _ \  / _ \ | __| | |  / _ \   > <  
+         | |_) | |  __/ |  __/ | |_  | | |  __/  / . \ 
+         |____/   \___|  \___|  \__| |_|  \___| /_/ \_\ 
+
+                                           xrpc framework   
+
+";
+            logo += " -----------------------------------------------------------------------------\r\n";
 
             logo += $" {productAttr.Copyright}\r\n";
             logo += $" ServerGC    [{GCSettings.IsServerGC}]\r\n";
@@ -326,7 +411,7 @@ namespace BeetleX.XRPC
             {
                 logo += $" {item}\r\n";
             }
-            logo += "*******************************************************************************\r\n";
+            logo +=" -----------------------------------------------------------------------------\r\n";
 
             Server.Log(LogType.Info, null, logo);
         }
@@ -340,7 +425,7 @@ namespace BeetleX.XRPC
         {
             System.Threading.Interlocked.Increment(ref mResponses);
             response.ID = request.ID;
-            request.Sesion.Send(response);
+            request.Session.Send(response);
         }
 
         public object this[string name]
@@ -373,6 +458,20 @@ namespace BeetleX.XRPC
             }
         }
 
+        public T Delegate<T>(ISession session) where T : Delegate
+        {
+            var name = DelegateHandler.GetDelegateName(typeof(T));
+            ServerDelegateHandler result = session[name] as ServerDelegateHandler;
+            if (result == null)
+            {
+                result = new ServerDelegateHandler(typeof(T));
+                result.Init();
+                result.Bind(session, this);
+                session[name] = result;
+            }
+            return (T)result.SessionDelegateProxy;
+        }
+
         public T GetClient<T>(ISession session)
         {
             string key = typeof(T).Name;
@@ -389,6 +488,95 @@ namespace BeetleX.XRPC
             }
             return (T)result;
 
+        }
+
+        private ConcurrentDictionary<string, DelegatePublisher> mDelegatePublishers = new ConcurrentDictionary<string, DelegatePublisher>(StringComparer.OrdinalIgnoreCase);
+
+        private DelegatePublisher GetPublisher(string action)
+        {
+            DelegatePublisher item = new DelegatePublisher(action);
+            if (!mDelegatePublishers.TryAdd(action, item))
+                mDelegatePublishers.TryGetValue(action, out item);
+            return item;
+        }
+
+        private void OnSubscribe(RPCPacket packet)
+        {
+            var path = packet.Url.SubRightWith('/', out string action);
+            var item = GetPublisher(action);
+            item.Add(packet.Session);
+            packet.ReplySuccess();
+        }
+
+        public T Publish<T>() where T : Delegate
+        {
+            Type type = typeof(T);
+            string name = DelegateHandler.GetDelegateName(type);
+            var item = GetPublisher(name);
+            return (T)item.CreateDelegate(type);
+        }
+
+        private async void InvokeDelegate(RPCPacket packet)
+        {
+            var path = packet.Url.SubRightWith('/', out string action);
+            if (mDelegateHandlers.TryGetValue(action, out DelegateHandler handler))
+            {
+                try
+                {
+                    packet.LoadParameters(handler.Parameters);
+                    object result = handler.Delegate.DynamicInvoke(packet.Data);
+                    if (!handler.IsVoid)
+                    {
+                        await (Task)result;
+                        if (handler.TargetReturnType != null)
+                        {
+                            var data = handler.GetValue(result);
+                            packet.Reply(data);
+                        }
+                        else
+                        {
+                            packet.ReplySuccess();
+                        }
+                    }
+                }
+                catch (Exception e_)
+                {
+                    if (!handler.IsVoid)
+                    {
+                        packet.ReplyError((short)StatusCode.INNER_ERROR, $"{action} delegate invoke error {e_.Message}!");
+                    }
+                    if (EnableLog(LogType.Error))
+                        Log(LogType.Error, $"{action} delegate invoke error {e_.Message}@{e_.StackTrace}");
+
+                }
+            }
+            else
+            {
+                if (packet.NeedReply)
+                {
+                    packet.ReplyError((short)StatusCode.ACTION_NOT_FOUND, $"{action} delegate not found!");
+                }
+            }
+        }
+
+        private ConcurrentDictionary<string, DelegateHandler> mDelegateHandlers = new ConcurrentDictionary<string, DelegateHandler>(StringComparer.OrdinalIgnoreCase);
+
+        public XRPCServer AddDelegate<T>(T handler) where T : Delegate
+        {
+            DelegateHandler item = new DelegateHandler(typeof(T));
+            item.Delegate = handler;
+            item.Init();
+            mDelegateHandlers[item.Name] = item;
+            return this;
+        }
+    }
+
+    public static class XRPCServerExten
+    {
+
+        public static string XRPCUserName(this ISession sessino)
+        {
+            return (string)sessino?[XRPCServer.NAME_PROPERTY_TAG];
         }
     }
 }

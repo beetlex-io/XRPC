@@ -4,9 +4,9 @@ using System.Text;
 
 namespace BeetleX.XRPC.Events
 {
-    public class EventActionNotFoundArgs : EventXRPCArgs
+    public class EventPacketArgs : EventXRPCArgs
     {
-        public EventActionNotFoundArgs(XRPCServer server, RPCPacket packet) : base(server
+        public EventPacketArgs(XRPCServer server, RPCPacket packet) : base(server
             )
         {
             Packet = packet;
@@ -14,4 +14,15 @@ namespace BeetleX.XRPC.Events
 
         public RPCPacket Packet { get; internal set; }
     }
+
+    public class EventPacketProcessingArgs : EventPacketArgs
+    {
+        public EventPacketProcessingArgs(XRPCServer server, RPCPacket packet) : base(server, packet)
+        {
+
+        }
+
+        public bool Cancel { get; set; } = false;
+    }
+
 }

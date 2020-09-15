@@ -33,7 +33,7 @@ namespace BeetleX.XRPC.Packets
                 if (mRequest == null)
                 {
                     mRequest = new RPCPacket();
-                    mRequest.Sesion = session;
+                    mRequest.Session = session;
                   
                 }
                 if (mRequest.Read(Options, pstream))

@@ -12,7 +12,7 @@ using System.Net.Security;
 
 namespace BeetleX.XRPC.Clients
 {
-    public class XRPCClient
+    public partial class XRPCClient
     {
         public EventClientError NetError
         {
@@ -123,13 +123,17 @@ namespace BeetleX.XRPC.Clients
                     response.Status = (short)StatusCode.INNER_ERROR;
                     response.Data = new object[] { $"{e_.Message}@{e_.StackTrace}" };
                 }
-
                 mAwaiterFactory.Completed(awaitItem, response);
             }
             else
             {
                 try
                 {
+                    if (response.Url.IndexOf(DELEGATE_TAG, StringComparison.OrdinalIgnoreCase) == 0)
+                    {
+                        InvokeDelegate(response);
+                        return;
+                    }
                     //notfound;
                     var item = Controllers.GetHandler(response.Url);
                     if (item != null)
@@ -187,19 +191,15 @@ namespace BeetleX.XRPC.Clients
                 if (mSslServerName == null)
                 {
                     client = BeetleX.SocketFactory.CreateClient<BeetleX.Clients.AsyncTcpClient>(
-
                 packet, Host, Port);
                 }
                 else
                 {
                     client = BeetleX.SocketFactory.CreateSslClient<BeetleX.Clients.AsyncTcpClient>(
-
              packet, Host, Port, mSslServerName);
                 }
                 client.PacketReceive = OnPacketCompleted;
                 client.ClientError = OnError;
-                bool isnew;
-                client.Connect(out isnew);
                 mClients.Add(new TcpClientItem(client, this));
             }
         }
@@ -236,12 +236,16 @@ namespace BeetleX.XRPC.Clients
             Controllers.Register<Service>(serviceImpl);
         }
 
-        public void Send(RPCPacket request, AsyncTcpClient client = null)
+        public async Task Send(RPCPacket request, AsyncTcpClient client = null)
         {
             client = client ?? GetClient();
             bool isnew;
             if (client.Connect(out isnew))
             {
+                if (isnew)
+                {
+                    await OnLogin(client);
+                }
                 client.Send(request);
                 System.Threading.Interlocked.Increment(ref mRequests);
             }
@@ -251,45 +255,55 @@ namespace BeetleX.XRPC.Clients
             }
         }
 
-        public Task<RPCPacket> SendWait(RPCPacket request, AsyncTcpClient client, Type[] resultType = null)
+        public async Task<RPCPacket> SendWait(RPCPacket request, AsyncTcpClient client, Type[] resultType = null)
         {
             client = client ?? GetClient();
             bool isnew;
             if (client.Connect(out isnew))
             {
+                if (isnew)
+                {
+                    await OnLogin(client);
+                }
                 var result = mAwaiterFactory.Create(request, resultType, TimeOut);
                 request.ID = result.Item1;
                 client.Send(request);
                 System.Threading.Interlocked.Increment(ref mRequests);
-                return result.Item2.Task;
+                return await result.Item2.Task;
             }
             else
             {
                 throw client.LastError;
             }
         }
+
         #region ping
 
         private System.Threading.Timer mPingTimer;
 
-        private int mPingTimeout = 0;
+        private int mPingTime = 0;
 
-        public int PingTimeout
+        public int PingTime
         {
             get
             {
-                return mPingTimeout;
+                return mPingTime;
             }
             set
             {
-                mPingTimeout = value;
-                if (mPingTimeout > 0)
-                    mPingTimer.Change(1000, 1000);
+                mPingTime = value;
+                if (mPingTime < 1000)
+                    mPingTime = 1000;
+                if (mPingTime > 0)
+                    mPingTimer.Change(mPingTime, mPingTime);
                 else
-                    mPingTimer.Change(100000, 100000);
+                    mPingTimer.Change(1000 * 30, 1000 * 30);
             }
         }
-
+        public void Ping()
+        {
+            OnPing(null);
+        }
         private void OnPing(object state)
         {
             foreach (var item in Clients)

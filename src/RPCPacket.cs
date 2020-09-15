@@ -40,7 +40,7 @@ namespace BeetleX.XRPC
 
         public ArraySegment<byte>? PayloadData { get; internal set; }
 
-        public BeetleX.ISession Sesion { get; internal set; }
+        public BeetleX.ISession Session { get; internal set; }
 
         public BeetleX.Clients.AsyncTcpClient Client { get; internal set; }
 
@@ -252,6 +252,13 @@ namespace BeetleX.XRPC
             }
         }
 
+        public void ReplyError(short status, string message)
+        {
+            RPCPacket response = new RPCPacket();
+            response.Status = status;
+            response.Data = new string[] { message };
+            ReplyPacket(response);
+        }
         public void ReplyError(string message)
         {
             RPCPacket response = new RPCPacket();
@@ -260,9 +267,17 @@ namespace BeetleX.XRPC
             ReplyPacket(response);
         }
 
+        public void ReplySuccess()
+        {
+            RPCPacket response = new RPCPacket();
+            response.Status = (short)StatusCode.SUCCESS;
+            ReplyPacket(response);
+        }
+
         public void Reply(params object[] data)
         {
             RPCPacket response = new RPCPacket();
+            response.Status = (short)StatusCode.SUCCESS;
             response.Data = data;
             ReplyPacket(response);
         }
@@ -270,8 +285,8 @@ namespace BeetleX.XRPC
         public void ReplyPacket(RPCPacket response)
         {
             response.ID = this.ID;
-            if (Sesion != null)
-                Sesion.Send(response);
+            if (Session != null)
+                Session.Send(response);
             if (Client != null)
                 Client.Send(response);
         }

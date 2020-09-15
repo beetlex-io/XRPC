@@ -19,7 +19,7 @@ namespace BeetleX.XRPC
 
         public override string ToString()
         {
-            return $"{Request.Sesion.RemoteEndPoint}";
+            return $"{Request.Session.RemoteEndPoint}";
         }
     }
 }

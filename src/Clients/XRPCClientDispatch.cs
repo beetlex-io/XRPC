@@ -1,4 +1,5 @@
-﻿using EventNext;
+﻿using BeetleX.Clients;
+using EventNext;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -7,7 +8,14 @@ using System.Text;
 
 namespace BeetleX.XRPC.Clients
 {
-    public class XRPCClientDispatch : DispatchProxy, EventNext.IHeader
+
+    public interface INetClient
+    {
+       BeetleX.Clients.AsyncTcpClient TcpClient { get; set; }
+    }
+
+
+    public class XRPCClientDispatch : DispatchProxy, EventNext.IHeader,INetClient
     {
 
         private Dictionary<string, ClientActionHandler> mHandlers = new Dictionary<string, ClientActionHandler>();
@@ -23,6 +31,8 @@ namespace BeetleX.XRPC.Clients
         public string Actor { get; set; }
 
         public Dictionary<string, string> Header => mHeader;
+
+        public AsyncTcpClient TcpClient { get; set; }
 
         internal void InitHandlers()
         {
@@ -87,7 +97,7 @@ namespace BeetleX.XRPC.Clients
                         request.Header.Add(item.Key, item.Value);
                     }
                 }
-                var task = Client.SendWait(request, null, handler.ResponseType);
+                var task = Client.SendWait(request, TcpClient, handler.ResponseType);
                 if (!handler.IsTaskResult)
                 {
                     if (task.Wait(Client.TimeOut))

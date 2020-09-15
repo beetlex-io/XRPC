@@ -32,7 +32,7 @@ namespace BeetleX.XRPC.Clients
                 var request = new RPCPacket();
                 request.Url = handler.Url;
                 request.Data = args;
-                var task = Server.SendWait(request, Session, handler.ResponseType, Server.ClientTimeout);
+                var task = Server.SendWait(request, Session, handler.ResponseType);
                 IAnyCompletionSource source = handler.GetCompletionSource();
                 source.WaitResponse(task);
                 return source.GetTask();

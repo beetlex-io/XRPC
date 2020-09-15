@@ -32,23 +32,29 @@ namespace BeetleX.XRPC.Clients
 
         public async void WaitResponse(Task<RPCPacket> task)
         {
-            var response = await task;
-            if (response.Status != (short)StatusCode.SUCCESS)
+            try
             {
-                XRPCException error = new XRPCException((string)response.Data[0]);
-                Error(error);
-            }
-            else
-            {
-                if (response.Paramters > 0)
+                var response = await task;
+                if (response.Status != (short)StatusCode.SUCCESS)
                 {
-                    object result = response.Data[0];
-                    Success(result);
+                    XRPCException error = new XRPCException((string)response.Data[0]);
+                    Error(error);
                 }
                 else
                 {
-                    Success(new object());
+                    if (response.Paramters > 0)
+                    {
+                        object result = response.Data[0];
+                        Success(result);
+                    }
+                    else
+                    {
+                        Success(new object());
+                    }
                 }
+            }catch(Exception e_)
+            {
+                Error(e_);
             }
         }
 
