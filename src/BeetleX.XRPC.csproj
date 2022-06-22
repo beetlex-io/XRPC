@@ -28,7 +28,7 @@
     <PackageReference Include="BeetleX" Version="1.5.4" />
     <PackageReference Include="EventNext" Version="0.9.8" />
     <PackageReference Include="MessagePack" Version="2.0.323" />
-    <PackageReference Include="Newtonsoft.Json" Version="12.0.3" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
   </ItemGroup>
 
 </Project>
